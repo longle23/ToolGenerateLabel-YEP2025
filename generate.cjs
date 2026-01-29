@@ -351,7 +351,13 @@ async function generateLabelForRow(row, index) {
   const sttNumber = parseInt(stt, 10);
   const seq = Number.isNaN(sttNumber) ? index + 1 : sttNumber;
   const fileName = `label_${String(seq).padStart(3, '0')}.png`;
-  const outPath = path.join(outputDir, fileName);
+  
+  // Lưu vào folder output/one/
+  const outputOneDir = path.join(__dirname, 'output', 'one');
+  if (!fs.existsSync(outputOneDir)) {
+    fs.mkdirSync(outputOneDir, { recursive: true });
+  }
+  const outPath = path.join(outputOneDir, fileName);
 
   // Raster SVG ở kích thước pixel cố định (1/4 A4),
   // chỉ set metadata density để DPI = 300 mà không phóng to ảnh.
@@ -364,11 +370,132 @@ async function generateLabelForRow(row, index) {
   console.log(`Đã tạo: ${fileName}`);
 }
 
+// ===== Tạo sheet A4 ngang với 8 labels (2 hàng x 4 cột) =====
+async function createA4Sheet(labels, sheetIndex, withCutLines = true) {
+  // Kích thước A4 NGANG: 297mm x 210mm
+  const a4WidthMm = 297;
+  const a4HeightMm = 210;
+  const a4WidthPx = mmToPx(a4WidthMm, DPI);
+  const a4HeightPx = mmToPx(a4HeightMm, DPI);
+  
+  // Layout: 2 hàng x 4 cột
+  const cols = 4;
+  const rows = 2;
+  
+  // Kích thước mỗi label trong sheet (chia đều A4)
+  const labelWidthInSheetMm = a4WidthMm / cols;   // 297/4 = 74.25mm
+  const labelHeightInSheetMm = a4HeightMm / rows;  // 210/2 = 105mm
+  const labelWidthInSheetPx = mmToPx(labelWidthInSheetMm, DPI);
+  const labelHeightInSheetPx = mmToPx(labelHeightInSheetMm, DPI);
+  
+  // Tạo canvas A4 trắng
+  let compositeArray = [];
+  
+  // Tạo từng label và đặt vào đúng vị trí
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const index = row * cols + col;
+      if (index < labels.length) {
+        const label = labels[index];
+        const x = col * labelWidthInSheetPx;
+        const y = row * labelHeightInSheetPx;
+        
+        // Tạo SVG cho label này với kích thước gốc
+        const labelSvg = createLabelSvg(label);
+        
+        // Convert SVG sang buffer và scale xuống kích thước trong sheet
+        const labelBuffer = await sharp(Buffer.from(labelSvg))
+          .resize(labelWidthInSheetPx, labelHeightInSheetPx, { fit: 'fill' })
+          .png()
+          .toBuffer();
+        
+        // Thêm vào mảng composite
+        compositeArray.push({
+          input: labelBuffer,
+          top: y,
+          left: x
+        });
+      }
+    }
+  }
+  
+  // Tạo đường kẻ đứt nếu cần
+  let cutLinesSvg = '';
+  if (withCutLines) {
+    const dashArray = '10,10';
+    const strokeWidth = 2;
+    const strokeColor = '#CCCCCC';
+    
+    // Đường kẻ ngang (1 đường giữa 2 hàng)
+    for (let i = 1; i < rows; i++) {
+      const y = i * labelHeightInSheetPx;
+      cutLinesSvg += `
+  <line x1="0" y1="${y}" x2="${a4WidthPx}" y2="${y}" 
+        stroke="${strokeColor}" stroke-width="${strokeWidth}" 
+        stroke-dasharray="${dashArray}" />`;
+    }
+    
+    // Đường kẻ dọc (3 đường giữa 4 cột)
+    for (let i = 1; i < cols; i++) {
+      const x = i * labelWidthInSheetPx;
+      cutLinesSvg += `
+  <line x1="${x}" y1="0" x2="${x}" y2="${a4HeightPx}" 
+        stroke="${strokeColor}" stroke-width="${strokeWidth}" 
+        stroke-dasharray="${dashArray}" />`;
+    }
+  }
+  
+  // Tạo SVG cho đường kẻ đứt
+  const cutLinesSvgFull = `
+<svg width="${a4WidthPx}" height="${a4HeightPx}" viewBox="0 0 ${a4WidthPx} ${a4HeightPx}" xmlns="http://www.w3.org/2000/svg">
+  ${cutLinesSvg}
+</svg>`.trim();
+  
+  const cutLinesBuffer = await sharp(Buffer.from(cutLinesSvgFull))
+    .resize(a4WidthPx, a4HeightPx, { fit: 'fill' })
+    .png()
+    .toBuffer();
+  
+  // Thêm đường kẻ đứt vào composite array
+  if (withCutLines) {
+    compositeArray.push({
+      input: cutLinesBuffer,
+      top: 0,
+      left: 0
+    });
+  }
+  
+  // Tạo canvas trắng A4 và composite tất cả
+  const outputSheetDir = path.join(__dirname, 'output', 'sheet');
+  if (!fs.existsSync(outputSheetDir)) {
+    fs.mkdirSync(outputSheetDir, { recursive: true });
+  }
+  
+  const fileName = `sheet_A4_${String(sheetIndex + 1).padStart(3, '0')}.png`;
+  const outPath = path.join(outputSheetDir, fileName);
+  
+  await sharp({
+    create: {
+      width: a4WidthPx,
+      height: a4HeightPx,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 1 }
+    }
+  })
+    .composite(compositeArray)
+    .png()
+    .withMetadata({ density: DPI })
+    .toFile(outPath);
+  
+  console.log(`Đã tạo sheet A4: ${fileName}`);
+}
+
 // ===== Đọc CSV bằng papaparse =====
 async function run() {
   // Ưu tiên đọc từ resources/, sau đó fallback về file input.csv ở root
   const candidatePaths = [
     path.join(__dirname, 'resources', 'Data29-01-2026.csv'),
+    // path.join(__dirname, 'resources', 'DataTest.csv'),
     path.join(__dirname, 'input.csv')
   ];
 
@@ -396,10 +523,58 @@ async function run() {
   const rows = parsed.data || [];
   console.log(`Đã đọc ${rows.length} dòng từ CSV.`);
 
+  // Tạo mảng chứa thông tin labels
+  const labelData = [];
+
+  // Generate từng label riêng lẻ
+  console.log('\n=== Tạo từng phiếu riêng lẻ ===');
   for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const sttRaw = row.STT || row.stt || row.Stt || '';
+    const nameRaw = row.Name || row.NAME || row.name || '';
+    const codeRaw = row.Code || row.CODE || row.code || '';
+    const departmentRaw = row.Department || row.department || row.DEPARTMENT || '';
+    const companyRaw = row.Company || row.company || row.COMPANY || '';
+
+    const stt = String(sttRaw).trim();
+    const name = String(nameRaw).trim().toUpperCase();
+    const code = String(codeRaw).trim().toUpperCase();
+    
+    const department = String(departmentRaw).trim();
+    const company = String(companyRaw).trim();
+    const departmentCompany = department && company
+      ? `${department} - ${company}`
+      : department || company;
+
+    if (!name) {
+      console.warn(`Bỏ qua dòng ${i + 1} vì Name trống.`);
+      continue;
+    }
+
+    const sttDisplay = stt ? String(stt).padStart(3, '0') : '';
+    
+    // Lưu vào mảng để tạo sheet A4 sau
+    labelData.push({ stt: sttDisplay, name, code, departmentCompany });
+    
     // eslint-disable-next-line no-await-in-loop
-    await generateLabelForRow(rows[i], i);
+    await generateLabelForRow(row, i);
   }
+
+  // Generate các sheet A4
+  console.log('\n=== Tạo các sheet A4 (8 phiếu/sheet) ===');
+  const sheetsCount = Math.ceil(labelData.length / 8);
+  for (let i = 0; i < sheetsCount; i++) {
+    const startIdx = i * 8;
+    const endIdx = Math.min(startIdx + 8, labelData.length);
+    const sheetLabels = labelData.slice(startIdx, endIdx);
+    
+    // eslint-disable-next-line no-await-in-loop
+    await createA4Sheet(sheetLabels, i, true);
+  }
+  
+  console.log(`\n=== Hoàn thành ===`);
+  console.log(`- Đã tạo ${labelData.length} phiếu riêng lẻ trong thư mục output/one/`);
+  console.log(`- Đã tạo ${sheetsCount} sheet A4 trong thư mục output/sheet/`);
 }
 
 run().catch((err) => {
