@@ -196,25 +196,28 @@ function createLabelSvg({ stt, name, code, departmentCompany }) {
   const strokeColor = circleCfg.strokeColor || '#000000';
   const lineWidth = circleCfg.lineWidth || 4;
 
-  // Sử dụng RobotoCondensed cho tất cả text
-  const sttFontFamily = 'RobotoCondensed';
-  const nameFontFamily = 'RobotoCondensed';
-  const codeFontFamily = 'RobotoCondensed';
-  const deptFontFamily = 'RobotoCondensed';
+  // Sử dụng fontFamily từ config (mặc định Arial)
+  const sttFontFamily = sttCfg.fontFamily || 'Arial';
+  const nameFontFamily = nameCfg.fontFamily || 'Arial';
+  const codeFontFamily = codeCfg.fontFamily || 'Arial';
+  const deptFontFamily = deptCfg.fontFamily || 'Arial';
 
   const sttFontWeight = sttCfg.fontWeight || 'bold';
   const nameFontWeight = nameCfg.fontWeight || 'normal';
   const codeFontWeight = codeCfg.fontWeight || 'normal';
   const deptFontWeight = deptCfg.fontWeight || 'normal';
 
-  // Tạo @font-face cho font RobotoCondensed
-  const fontFaces = generateFontFace();
+  // Arial là font hệ thống, không cần embed font-face
+  const fontFaces = '';
 
   const deptFontSize = deptCfg.fontSize || 20;
   const lineHeight = deptCfg.lineHeight || 1.2;
 
   // Wrap text cho Department - Company
-  const maxWidthPx = widthPx * 0.9; // 90% chiều rộng để có margin
+  // Tính padding left và right (chuyển từ mm sang px)
+  const paddingLeftPx = deptCfg.paddingLeft ? mmToPx(deptCfg.paddingLeft, DPI) : 0;
+  const paddingRightPx = deptCfg.paddingRight ? mmToPx(deptCfg.paddingRight, DPI) : 0;
+  const maxWidthPx = widthPx * 0.9 - paddingLeftPx - paddingRightPx; // 90% chiều rộng trừ padding
   const deptLines = departmentCompany
     ? wrapText(departmentCompany, maxWidthPx, deptFontSize, deptFontFamily)
     : [];
@@ -365,7 +368,7 @@ async function generateLabelForRow(row, index) {
 async function run() {
   // Ưu tiên đọc từ resources/, sau đó fallback về file input.csv ở root
   const candidatePaths = [
-    path.join(__dirname, 'resources', 'DataTest.csv'),
+    path.join(__dirname, 'resources', 'Data29-01-2026.csv'),
     path.join(__dirname, 'input.csv')
   ];
 

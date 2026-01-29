@@ -6,40 +6,42 @@
   },
   "stt": {
     "x": "center",
-    "y": 50,
-    "fontSize": 400,
-    "fontFamily": "RobotoCondensed",
+    "y": 52,
+    "fontSize": 380,
+    "fontFamily": "Arial",
     "fontWeight": "bold",
     "color": "#000000",
     "align": "center"
   },
-  "name": {
+  "name":{
     "x": "center",
-    "y": 102,
+    "y": 104,
     "fontSize": 80,
-    "fontFamily": "RobotoCondensed",
+    "fontFamily": "Arial",
     "fontWeight": "bold",
     "color": "#000000",
     "align": "center"
   },
   "code": {
     "x": "center",
-    "y": 112,
+    "y": 114,
     "fontSize": 80,
-    "fontFamily": "RobotoCondensed",
+    "fontFamily": "Arial",
     "fontWeight": "bold",
     "color": "#000000",
     "align": "center"
   },
   "departmentCompany": {
     "x": "center",
-    "y": 122,
-    "fontSize": 80,
-    "fontFamily": "RobotoCondensed",
+    "y": 128,
+    "fontSize": 50,
+    "fontFamily": "Arial",
     "fontWeight": "normal",
     "color": "#000000",
     "align": "center",
-    "lineHeight": 1.2
+    "lineHeight": 1.2,
+    "paddingLeft": 7,
+    "paddingRight": 7
   },
   "circle": {
     "strokeColor": "#000000",
