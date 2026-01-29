@@ -1,0 +1,17 @@
+{
+  "name": "label-generator",
+  "version": "1.0.0",
+  "description": "Tool generate employee label PNG from CSV (YEP 2025)",
+  "main": "generate.cjs",
+  "type": "module",
+  "scripts": {
+    "start": "node generate.cjs",
+    "generate": "node generate.cjs"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.7.0",
+    "papaparse": "^5.5.3",
+    "sharp": "^0.34.3"
+  }
+}
+

@@ -1,0 +1,52 @@
+{
+  "page": {
+    "width_mm": 105,
+    "height_mm": 148.5,
+    "dpi": 300
+  },
+  "stt": {
+    "x": "center",
+    "y": 50,
+    "fontSize": 400,
+    "fontFamily": "RobotoCondensed",
+    "fontWeight": "bold",
+    "color": "#000000",
+    "align": "center"
+  },
+  "name": {
+    "x": "center",
+    "y": 102,
+    "fontSize": 80,
+    "fontFamily": "RobotoCondensed",
+    "fontWeight": "bold",
+    "color": "#000000",
+    "align": "center"
+  },
+  "code": {
+    "x": "center",
+    "y": 112,
+    "fontSize": 80,
+    "fontFamily": "RobotoCondensed",
+    "fontWeight": "bold",
+    "color": "#000000",
+    "align": "center"
+  },
+  "departmentCompany": {
+    "x": "center",
+    "y": 122,
+    "fontSize": 80,
+    "fontFamily": "RobotoCondensed",
+    "fontWeight": "normal",
+    "color": "#000000",
+    "align": "center",
+    "lineHeight": 1.2
+  },
+  "circle": {
+    "strokeColor": "#000000",
+    "lineWidth": 30,
+    "padding": 0,
+    "radiusRatio": 0.38
+  }
+}
+
+
