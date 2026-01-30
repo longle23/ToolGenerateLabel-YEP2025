@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const Papa = require('papaparse');
 const sharp = require('sharp');
+const PDFDocument = require('pdfkit');
 
 // ===== Helper: convert mm -> px theo DPI =====
 function mmToPx(mm, dpi) {
@@ -320,17 +321,28 @@ function escapeXml(unsafe) {
 }
 
 // ===== Generate label cho 1 dòng CSV =====
-async function generateLabelForRow(row, index) {
+async function generateLabelForRow(row, index, codeKey, nameKey, companyKey, departmentKey) {
   const sttRaw = row.STT || row.stt || row.Stt || '';
-  const nameRaw = row.Name || row.NAME || row.name || '';
-  const codeRaw = row.Code || row.CODE || row.code || '';
-  const departmentRaw = row.Department || row.department || row.DEPARTMENT || '';
-  const companyRaw = row.Company || row.company || row.COMPANY || '';
+  // Hỗ trợ cả header tiếng Anh và tiếng Việt
+  const nameRaw = row[nameKey] || row.Name || row.NAME || row.name || '';
+  const codeRaw = row[codeKey] || row.Code || row.CODE || row.code || '';
+  const departmentRaw = row[departmentKey] || row.Department || row.department || row.DEPARTMENT || '';
+  const companyRaw = row[companyKey] || row.Company || row.company || row.COMPANY || '';
 
   const stt = String(sttRaw).trim();
   // Luôn viết hoa NAME và CODE
   const name = String(nameRaw).trim().toUpperCase();
-  const code = String(codeRaw).trim().toUpperCase();
+  
+  // Lấy Code từ CSV gốc và trim
+  const codeRawTrimmed = String(codeRaw || '').trim();
+  
+  // Kiểm tra Code trong CSV gốc: nếu trống hoặc là "Khách mời" thì bỏ qua
+  if (!codeRawTrimmed || codeRawTrimmed.toLowerCase() === 'khách mời') {
+    console.warn(`Bỏ qua dòng ${index + 1} vì Code trống hoặc là "Khách mời".`);
+    return;
+  }
+  
+  const code = codeRawTrimmed.toUpperCase();
   
   // Kết hợp Department - Company
   const department = String(departmentRaw).trim();
@@ -467,14 +479,22 @@ async function createA4Sheet(labels, sheetIndex, withCutLines = true) {
   
   // Tạo canvas trắng A4 và composite tất cả
   const outputSheetDir = path.join(__dirname, 'output', 'sheet');
+  const outputPdfDir = path.join(__dirname, 'output', 'sheet-pdf');
   if (!fs.existsSync(outputSheetDir)) {
     fs.mkdirSync(outputSheetDir, { recursive: true });
   }
+  if (!fs.existsSync(outputPdfDir)) {
+    fs.mkdirSync(outputPdfDir, { recursive: true });
+  }
   
-  const fileName = `sheet_A4_${String(sheetIndex + 1).padStart(3, '0')}.png`;
-  const outPath = path.join(outputSheetDir, fileName);
+  // Tạo cả PNG và PDF
+  const fileNamePng = `sheet_A4_${String(sheetIndex + 1).padStart(3, '0')}.png`;
+  const fileNamePdf = `sheet_A4_${String(sheetIndex + 1).padStart(3, '0')}.pdf`;
+  const outPathPng = path.join(outputSheetDir, fileNamePng);
+  const outPathPdf = path.join(outputPdfDir, fileNamePdf);
   
-  await sharp({
+  // Tạo image buffer từ composite
+  const imageBuffer = await sharp({
     create: {
       width: a4WidthPx,
       height: a4HeightPx,
@@ -483,18 +503,50 @@ async function createA4Sheet(labels, sheetIndex, withCutLines = true) {
     }
   })
     .composite(compositeArray)
-    .png()
     .withMetadata({ density: DPI })
-    .toFile(outPath);
+    .png()
+    .toBuffer();
   
-  console.log(`Đã tạo sheet A4: ${fileName}`);
+  // Tạo PNG
+  await sharp(imageBuffer)
+    .toFile(outPathPng);
+  
+  // Tạo PDF từ PNG buffer sử dụng pdfkit
+  // A4 landscape: 297mm x 210mm (convert sang points: 1mm = 2.83465 points)
+  const pdfWidth = a4WidthMm * 2.83465;  // ~841.89 points
+  const pdfHeight = a4HeightMm * 2.83465; // ~595.28 points
+  
+  const doc = new PDFDocument({
+    size: [pdfWidth, pdfHeight],
+    margin: 0
+  });
+  
+  const stream = fs.createWriteStream(outPathPdf);
+  doc.pipe(stream);
+  
+  // Thêm image vào PDF
+  doc.image(imageBuffer, {
+    fit: [pdfWidth, pdfHeight],
+    align: 'center',
+    valign: 'center'
+  });
+  
+  doc.end();
+  
+  // Đợi stream hoàn thành
+  await new Promise((resolve, reject) => {
+    stream.on('finish', resolve);
+    stream.on('error', reject);
+  });
+  
+  console.log(`Đã tạo sheet A4: ${fileNamePng} và ${fileNamePdf}`);
 }
 
 // ===== Đọc CSV bằng papaparse =====
 async function run() {
   // Ưu tiên đọc từ resources/, sau đó fallback về file input.csv ở root
   const candidatePaths = [
-    path.join(__dirname, 'resources', 'Data29-01-2026.csv'),
+    path.join(__dirname, 'resources', 'DataMain30-01.csv'),
     // path.join(__dirname, 'resources', 'DataTest.csv'),
     path.join(__dirname, 'input.csv')
   ];
@@ -528,17 +580,52 @@ async function run() {
 
   // Generate từng label riêng lẻ
   console.log('\n=== Tạo từng phiếu riêng lẻ ===');
+  
+  // Tìm các key thực tế từ dòng đầu tiên (hỗ trợ cả tiếng Anh và tiếng Việt)
+  const firstRow = rows[0] || {};
+  const allKeys = Object.keys(firstRow);
+  const codeKey = allKeys.find(k => 
+    k.toLowerCase() === 'code' || 
+    k.toLowerCase().includes('mã') || 
+    k.toLowerCase().includes('ma nv')
+  ) || 'Code';
+  const nameKey = allKeys.find(k => 
+    k.toLowerCase() === 'name' || 
+    k.toLowerCase().includes('họ tên') || 
+    k.toLowerCase().includes('ho ten')
+  ) || 'Name';
+  const companyKey = allKeys.find(k => 
+    k.toLowerCase() === 'company' || 
+    k.toLowerCase().includes('công ty') || 
+    k.toLowerCase().includes('cong ty')
+  ) || 'Company';
+  const departmentKey = allKeys.find(k => 
+    k.toLowerCase() === 'department' || 
+    k.toLowerCase().includes('khối') || 
+    k.toLowerCase().includes('phòng')
+  ) || 'Department';
+  
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const sttRaw = row.STT || row.stt || row.Stt || '';
-    const nameRaw = row.Name || row.NAME || row.name || '';
-    const codeRaw = row.Code || row.CODE || row.code || '';
-    const departmentRaw = row.Department || row.department || row.DEPARTMENT || '';
-    const companyRaw = row.Company || row.company || row.COMPANY || '';
+    const nameRaw = row[nameKey] || row.Name || row.NAME || row.name || '';
+    const codeRaw = row[codeKey] || row.Code || row.CODE || row.code || '';
+    const departmentRaw = row[departmentKey] || row.Department || row.department || row.DEPARTMENT || '';
+    const companyRaw = row[companyKey] || row.Company || row.company || row.COMPANY || '';
 
     const stt = String(sttRaw).trim();
     const name = String(nameRaw).trim().toUpperCase();
-    const code = String(codeRaw).trim().toUpperCase();
+    
+    // Lấy Code từ CSV gốc và trim
+    const codeRawTrimmed = String(codeRaw || '').trim();
+    
+    // Kiểm tra Code trong CSV gốc: nếu trống hoặc là "Khách mời" thì bỏ qua
+    if (!codeRawTrimmed || codeRawTrimmed.toLowerCase() === 'khách mời') {
+      console.warn(`Bỏ qua dòng ${i + 1} vì Code trống hoặc là "Khách mời" (Code: "${codeRawTrimmed}").`);
+      continue;
+    }
+    
+    const code = codeRawTrimmed.toUpperCase();
     
     const department = String(departmentRaw).trim();
     const company = String(companyRaw).trim();
@@ -557,7 +644,7 @@ async function run() {
     labelData.push({ stt: sttDisplay, name, code, departmentCompany });
     
     // eslint-disable-next-line no-await-in-loop
-    await generateLabelForRow(row, i);
+    await generateLabelForRow(row, i, codeKey, nameKey, companyKey, departmentKey);
   }
 
   // Generate các sheet A4
@@ -574,7 +661,8 @@ async function run() {
   
   console.log(`\n=== Hoàn thành ===`);
   console.log(`- Đã tạo ${labelData.length} phiếu riêng lẻ trong thư mục output/one/`);
-  console.log(`- Đã tạo ${sheetsCount} sheet A4 trong thư mục output/sheet/`);
+  console.log(`- Đã tạo ${sheetsCount} sheet A4 PNG trong thư mục output/sheet/`);
+  console.log(`- Đã tạo ${sheetsCount} sheet A4 PDF trong thư mục output/sheet-pdf/`);
 }
 
 run().catch((err) => {
