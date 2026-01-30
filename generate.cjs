@@ -542,6 +542,135 @@ async function createA4Sheet(labels, sheetIndex, withCutLines = true) {
   console.log(`Đã tạo sheet A4: ${fileNamePng} và ${fileNamePdf}`);
 }
 
+// ===== Tạo sheet PDF trống =====
+async function createBlankPdfSheet() {
+  // Kích thước A4 NGANG: 297mm x 210mm
+  const a4WidthMm = 297;
+  const a4HeightMm = 210;
+  
+  // Layout: 2 hàng x 4 cột
+  const cols = 4;
+  const rows = 2;
+  
+  // Kích thước mỗi label trong sheet
+  const labelWidthInSheetMm = a4WidthMm / cols;   // 297/4 = 74.25mm
+  const labelHeightInSheetMm = a4HeightMm / rows;  // 210/2 = 105mm
+  
+  // Convert sang points: 1mm = 2.83465 points
+  const pdfWidth = a4WidthMm * 2.83465;  // ~841.89 points
+  const pdfHeight = a4HeightMm * 2.83465; // ~595.28 points
+  const labelWidthPoints = labelWidthInSheetMm * 2.83465;
+  const labelHeightPoints = labelHeightInSheetMm * 2.83465;
+  
+  // Lấy config cho vòng tròn
+  const circleCfg = config.circle || {};
+  const sttCfg = config.stt || {};
+  const pageCfg = config.page || {};
+  const strokeColor = circleCfg.strokeColor || '#000000';
+  const lineWidthPx = circleCfg.lineWidth || 4; // lineWidth trong config là pixel
+  const radiusRatio = circleCfg.radiusRatio || 0.35;
+  
+  // Tính bán kính vòng tròn GIỐNG HỆT như trong createLabelSvg
+  // Trong createLabelSvg: radius = Math.min(widthPx, heightPx) * radiusRatio
+  const originalLabelWidthPx = mmToPx(pageCfg.width_mm || 105, DPI);
+  const originalLabelHeightPx = mmToPx(pageCfg.height_mm || 148.5, DPI);
+  const originalRadiusPx = Math.min(originalLabelWidthPx, originalLabelHeightPx) * radiusRatio;
+  
+  // Label trong sheet được scale từ kích thước gốc
+  // Tính tỷ lệ scale (giống như trong createA4Sheet khi resize)
+  const labelWidthInSheetPx = mmToPx(labelWidthInSheetMm, DPI);
+  const labelHeightInSheetPx = mmToPx(labelHeightInSheetMm, DPI);
+  const scaleX = labelWidthInSheetPx / originalLabelWidthPx;
+  const scaleY = labelHeightInSheetPx / originalLabelHeightPx;
+  const scale = Math.min(scaleX, scaleY); // Dùng scale nhỏ hơn (giống resize với fit: 'fill')
+  
+  // Bán kính sau khi scale (từ pixel sang mm rồi sang points)
+  const radiusPxScaled = originalRadiusPx * scale;
+  const radiusMm = (radiusPxScaled / DPI) * 25.4; // Convert pixel sang mm
+  const radiusPoints = radiusMm * 2.83465; // Convert mm sang points
+  
+  // Vị trí Y của STT (từ config, y = 52mm từ trên label gốc)
+  // Tính trong pixel gốc, sau đó scale
+  const sttYFromTopOfLabelPx = mmToPx(sttCfg.y || 52, DPI);
+  const sttYFromTopOfLabelPxScaled = sttYFromTopOfLabelPx * scale;
+  const sttYFromTopOfLabelMm = (sttYFromTopOfLabelPxScaled / DPI) * 25.4;
+  const sttYFromTopOfLabelPoints = sttYFromTopOfLabelMm * 2.83465;
+  
+  // Line width (từ pixel sang mm rồi sang points)
+  const lineWidthMm = (lineWidthPx / DPI) * 25.4;
+  const lineWidthPoints = lineWidthMm * 2.83465;
+  
+  const outputPdfDir = path.join(__dirname, 'output', 'sheet-pdf');
+  if (!fs.existsSync(outputPdfDir)) {
+    fs.mkdirSync(outputPdfDir, { recursive: true });
+  }
+  
+  const fileNamePdf = 'sheet_A4_blank.pdf';
+  const outPathPdf = path.join(outputPdfDir, fileNamePdf);
+  
+  const doc = new PDFDocument({
+    size: [pdfWidth, pdfHeight],
+    margin: 0
+  });
+  
+  const stream = fs.createWriteStream(outPathPdf);
+  doc.pipe(stream);
+  
+  // Vẽ các đường kẻ đứt (cut lines)
+  doc.save();
+  doc.strokeColor('#CCCCCC');
+  doc.lineWidth(2);
+  doc.dash(10, { space: 10 });
+  
+  // Đường kẻ ngang (1 đường giữa 2 hàng)
+  for (let i = 1; i < rows; i++) {
+    const y = i * labelHeightPoints;
+    doc.moveTo(0, y)
+       .lineTo(pdfWidth, y)
+       .stroke();
+  }
+  
+  // Đường kẻ dọc (3 đường giữa 4 cột)
+  for (let i = 1; i < cols; i++) {
+    const x = i * labelWidthPoints;
+    doc.moveTo(x, 0)
+       .lineTo(x, pdfHeight)
+       .stroke();
+  }
+  
+  doc.restore();
+  
+  // Vẽ 8 vòng tròn trống (2 hàng x 4 cột)
+  doc.save();
+  doc.strokeColor(strokeColor);
+  doc.lineWidth(lineWidthPoints);
+  
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      // Vị trí center của label
+      const labelCenterX = (col + 0.5) * labelWidthPoints;
+      const labelTopY = row * labelHeightPoints;
+      const circleY = labelTopY + sttYFromTopOfLabelPoints;
+      
+      // Vẽ vòng tròn
+      doc.circle(labelCenterX, circleY, radiusPoints)
+         .stroke();
+    }
+  }
+  
+  doc.restore();
+  
+  doc.end();
+  
+  // Đợi stream hoàn thành
+  await new Promise((resolve, reject) => {
+    stream.on('finish', resolve);
+    stream.on('error', reject);
+  });
+  
+  console.log(`Đã tạo sheet PDF trống: ${fileNamePdf}`);
+}
+
 // ===== Đọc CSV bằng papaparse =====
 async function run() {
   // Ưu tiên đọc từ resources/, sau đó fallback về file input.csv ở root
@@ -659,10 +788,15 @@ async function run() {
     await createA4Sheet(sheetLabels, i, true);
   }
   
+  // Tạo sheet PDF trống
+  console.log('\n=== Tạo sheet PDF trống ===');
+  await createBlankPdfSheet();
+  
   console.log(`\n=== Hoàn thành ===`);
   console.log(`- Đã tạo ${labelData.length} phiếu riêng lẻ trong thư mục output/one/`);
   console.log(`- Đã tạo ${sheetsCount} sheet A4 PNG trong thư mục output/sheet/`);
   console.log(`- Đã tạo ${sheetsCount} sheet A4 PDF trong thư mục output/sheet-pdf/`);
+  console.log(`- Đã tạo 1 sheet PDF trống trong thư mục output/sheet-pdf/`);
 }
 
 run().catch((err) => {
